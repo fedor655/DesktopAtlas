@@ -19,8 +19,8 @@ rem Ищем интерпретатор: сначала своё окружен�
 rem в последнюю очередь - системный python.
 set PY=
 if exist ".venv\Scripts\python.exe" set PY=.venv\Scripts\python.exe
-if not defined PY if exist "..\соц аналитик\socanalytic (запустить и показать)\venv\Scripts\python.exe" (
-    set PY=..\соц аналитик\socanalytic (запустить и показать)\venv\Scripts\python.exe
+if not defined PY if exist "..\соц аналитик\socanalytic\venv\Scripts\python.exe" (
+    set PY=..\соц аналитик\socanalytic\venv\Scripts\python.exe
 )
 if not defined PY (
     where python >nul 2>nul

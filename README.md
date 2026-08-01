@@ -34,7 +34,7 @@ python serve.py            # 3. вьювер на http://127.0.0.1:8777
 Готовое окружение уже есть у соц аналитика:
 
 ```
-"..\соц аналитик\socanalytic (запустить и показать)\venv\Scripts\python.exe" build_map.py
+"..\соц аналитик\socanalytic\venv\Scripts\python.exe" build_map.py
 ```
 
 Первый прогон `build_map.py` считает LaBSE на процессоре ~10 минут.
