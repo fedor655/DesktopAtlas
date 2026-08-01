@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Карта смыслов рабочего стола</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --line:#232a35; --text:#e6edf3;
+    --dim:#8b949e; --accent:#4c8eda;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);
+    font:14px/1.45 "Segoe UI",system-ui,sans-serif;overflow:hidden}
+  #stage{position:absolute;inset:0;cursor:grab;touch-action:none}
+  #stage.drag{cursor:grabbing}
+  canvas{position:absolute;inset:0;display:block}
+
+  #top{position:absolute;top:0;left:0;right:0;z-index:5;display:flex;gap:8px;
+    align-items:center;padding:10px 12px;background:linear-gradient(#0e1116ee,#0e111600);
+    pointer-events:none;flex-wrap:wrap}
+  #top > *{pointer-events:auto}
+  .seg{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{background:none;border:0;color:var(--dim);padding:7px 13px;cursor:pointer;
+    font:inherit;border-right:1px solid var(--line)}
+  .seg button:last-child{border-right:0}
+  .seg button.on{background:var(--accent);color:#fff}
+  input[type=search]{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    color:var(--text);padding:7px 11px;width:230px;font:inherit;outline:none}
+  input[type=search]:focus{border-color:var(--accent)}
+  .chip{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    padding:7px 11px;color:var(--dim);cursor:pointer;user-select:none}
+  .chip.on{color:var(--text);border-color:var(--accent)}
+
+  #side{position:absolute;top:0;right:0;bottom:0;width:340px;z-index:6;
+    background:var(--panel);border-left:1px solid var(--line);padding:16px;
+    overflow-y:auto;transform:translateX(100%);transition:transform .18s ease}
+  #side.open{transform:none}
+  #side h2{margin:0 0 4px;font-size:16px;word-break:break-word}
+  #side .kind{color:var(--dim);font-size:12px;margin-bottom:12px}
+  #side .desc{margin:12px 0;padding:11px;background:#0e1116;border-radius:8px;
+    border-left:3px solid var(--accent)}
+  #side h3{font-size:12px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--dim);margin:16px 0 6px}
+  #side .row{display:flex;justify-content:space-between;padding:3px 0;
+    border-bottom:1px solid var(--line);font-size:13px}
+  #side .row span:last-child{color:var(--dim);text-align:right;margin-left:10px}
+  .nb{display:flex;justify-content:space-between;padding:5px 7px;border-radius:6px;
+    cursor:pointer;font-size:13px}
+  .nb:hover{background:#0e1116}
+  .nb b{font-weight:400}
+  .nb i{color:var(--dim);font-style:normal;font-variant-numeric:tabular-nums}
+  #open{width:100%;margin-top:16px;padding:10px;border:0;border-radius:8px;
+    background:var(--accent);color:#fff;font:inherit;cursor:pointer}
+  #open:hover{filter:brightness(1.12)}
+  #open:disabled{background:#30363d;color:var(--dim);cursor:default}
+  #close{position:absolute;top:10px;right:12px;background:none;border:0;
+    color:var(--dim);font-size:20px;cursor:pointer;line-height:1}
+
+  #legend{position:absolute;left:12px;bottom:12px;z-index:5;background:#161b22e0;
+    border:1px solid var(--line);border-radius:8px;padding:10px 12px;max-width:330px;
+    max-height:42vh;overflow-y:auto}
+  #legend div{display:flex;align-items:center;gap:7px;padding:2px 0;cursor:pointer;font-size:12px}
+  #legend div:hover{color:#fff}
+  #legend i{width:10px;height:10px;border-radius:50%;flex:0 0 auto}
+  #legend.hide{display:none}
+  #hint{position:absolute;right:12px;bottom:12px;z-index:4;color:#586069;font-size:12px}
+  #tip{position:absolute;z-index:7;background:#161b22f2;border:1px solid var(--line);
+    border-radius:6px;padding:5px 9px;font-size:12px;pointer-events:none;display:none;
+    max-width:280px}
+
+  #progress{position:absolute;top:56px;left:12px;z-index:8;display:none;
+    background:var(--panel);border:1px solid var(--accent);border-radius:8px;
+    padding:9px 13px;font-size:13px;max-width:460px}
+  #progress b{display:block;margin-bottom:2px}
+  #progress span{color:var(--dim);font-size:12px}
+  #progress.show{display:block}
+  #progress.err{border-color:#e0603e}
+
+  #side textarea{width:100%;min-height:88px;resize:vertical;background:#0e1116;
+    color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px;
+    font:inherit;outline:none}
+  #side textarea:focus{border-color:var(--accent)}
+  .btn-row{display:flex;gap:7px;margin-top:7px}
+  .btn-row button{flex:1;padding:7px;border:0;border-radius:7px;font:inherit;cursor:pointer}
+  #desc-save{background:var(--accent);color:#fff}
+  #desc-cancel{background:#30363d;color:var(--text)}
+  #desc-edit{margin-top:6px;background:none;border:1px dashed var(--line);
+    color:var(--dim);border-radius:7px;padding:5px 9px;font:inherit;cursor:pointer;width:100%}
+  #desc-edit:hover{color:var(--text);border-color:var(--accent)}
+  .desc.empty{color:var(--dim);font-style:italic;border-left-color:#30363d}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="cv"></canvas></div>
+<div id="tip"></div>
+
+<div id="top">
+  <div class="seg" id="variants"></div>
+  <input type="search" id="q" placeholder="поиск по столу…" autocomplete="off">
+  <div class="chip" id="t3d">3D</div>
+  <div class="chip on" id="tLabels">подписи</div>
+  <div class="chip on" id="tClusters">кластеры</div>
+  <div class="chip on" id="tHulls">области</div>
+  <div class="chip" id="tLegend">легенда</div>
+  <div class="chip" id="fit">вписать</div>
+  <div class="chip" id="rebuild" title="перечитать рабочий стол и пересчитать карту">пересчитать</div>
+</div>
+<div id="progress"><b id="p-step"></b><span id="p-note"></span></div>
+
+<aside id="side">
+  <button id="close">×</button>
+  <h2 id="s-name"></h2>
+  <div class="kind" id="s-kind"></div>
+  <div class="desc" id="s-desc"></div>
+  <button id="desc-edit">изменить описание</button>
+  <div id="desc-editor" style="display:none">
+    <textarea id="desc-text" placeholder="Чем это является и о чём — своими словами. Именно этот текст превращается в координаты на карте."></textarea>
+    <div class="btn-row">
+      <button id="desc-save">сохранить</button>
+      <button id="desc-cancel">отмена</button>
+    </div>
+  </div>
+  <div id="s-rows"></div>
+  <h3>Ближайшие по смыслу</h3>
+  <div id="s-nb"></div>
+  <button id="open">Открыть</button>
+</aside>
+
+<div id="legend" class="hide"></div>
+<div id="hint">колесо — зум · тащить — двигать · клик — карточка</div>
+
+<script>
+const PALETTE = ["#4c8eda","#e0603e","#42a86b","#c964d4","#d9a441","#3fb6c4",
+                 "#e05c86","#7f8ce0","#8bbf3f","#c47a3f","#5fbfa0","#b45fd0",
+                 "#d4545a","#4fa3d1","#9c9f45","#6fae7a","#cf7fa8","#7dd0e0"];
+
+let MAP=null, variant=null, pts=[], hulls=[];
+const view={x:0,y:0,k:1};
+let sel=null, hover=null, query="";
+const show={labels:true, clusters:true, hulls:true, legend:false};
+const NEUTRAL="#7d8a9c";
+const colorOf=p=>show.clusters ? PALETTE[p.cluster%PALETTE.length] : NEUTRAL;
+
+const cv=document.getElementById("cv"), ctx=cv.getContext("2d");
+const stage=document.getElementById("stage"), tip=document.getElementById("tip");
+
+function resize(){
+  const r=devicePixelRatio||1;
+  cv.width=innerWidth*r; cv.height=innerHeight*r;
+  cv.style.width=innerWidth+"px"; cv.style.height=innerHeight+"px";
+  ctx.setTransform(r,0,0,r,0,0);
+  draw();
+}
+addEventListener("resize",resize);
+
+/* --- координаты --- */
+const toScreen=p=>({x:p.x*view.k+view.x, y:p.y*view.k+view.y});
+
+/* --- 3D: своя проекция на тот же canvas, без внешних библиотек --- *
+ * Камера ходит по сфере вокруг центра облака. Точка поворачивается на yaw
+ * вокруг вертикали и на pitch вокруг горизонтали, потом делится на глубину —
+ * это и есть перспектива. Рисуем от дальних к ближним (алгоритм художника). */
+let mode3d=false, spin=true, has3d=false;
+const cam={yaw:0.6, pitch:0.35, dist:3.2};
+
+function project3(p){
+  const x=(p.x3!==undefined?p.x3:p.x)-0.5;
+  const y=(p.y3!==undefined?p.y3:p.y)-0.5;
+  const z=(p.z3!==undefined?p.z3:0)-0.5;
+  const cy=Math.cos(cam.yaw), sy=Math.sin(cam.yaw);
+  const cp=Math.cos(cam.pitch), sp=Math.sin(cam.pitch);
+  const x1= x*cy - z*sy;
+  const z1= x*sy + z*cy;
+  const y1= y*cp - z1*sp;
+  const z2= y*sp + z1*cp;
+  const depth=cam.dist - z2;
+  if(depth<0.05) return null;                      // за спиной камеры
+  // облако лежит в кубе со стороной 1, поэтому фокусное берём в разы больше
+  // экрана — иначе на экране получается точка в центре пустоты
+  const f=Math.max(1,Math.min(innerWidth,innerHeight))*2.6;
+  const side=document.getElementById("side").classList.contains("open")?340:0;
+  const cx=(innerWidth-side)/2, ccy=innerHeight/2+20;
+  // s — во сколько раз ближняя точка крупнее дальней; на дистанции камеры ~1
+  return {x:cx + x1*f/depth, y:ccy + y1*f/depth, s:2.6/depth, depth};
+}
+
+const screenOf = p => mode3d ? project3(p) : toScreen(p);
+
+function fit(animate=true){
+  if(mode3d){ cam.yaw=0.6; cam.pitch=0.35; cam.dist=3.4; draw(); return; }
+  const pad=Math.min(innerWidth,innerHeight)*0.09;
+  const side=document.getElementById("side").classList.contains("open")?340:0;
+  const w=innerWidth-side-pad*2, h=innerHeight-pad*2-40;
+  const k=Math.min(w,h);
+  const target={k, x:pad+(w-k)/2, y:pad+40+(h-k)/2};
+  if(!animate){Object.assign(view,target); draw(); return;}
+  const from={...view}, t0=performance.now();
+  (function step(t){
+    const a=Math.min(1,(t-t0)/320), e=1-Math.pow(1-a,3);
+    view.k=from.k+(target.k-from.k)*e;
+    view.x=from.x+(target.x-from.x)*e;
+    view.y=from.y+(target.y-from.y)*e;
+    draw();
+    if(a<1) requestAnimationFrame(step);
+  })(t0);
+}
+
+/* --- выпуклые оболочки кластеров --- */
+function convexHull(P){
+  if(P.length<3) return P.slice();
+  const s=P.slice().sort((a,b)=>a.x-b.x||a.y-b.y);
+  const cross=(o,a,b)=>(a.x-o.x)*(b.y-o.y)-(a.y-o.y)*(b.x-o.x);
+  const lo=[],up=[];
+  for(const p of s){ while(lo.length>1&&cross(lo[lo.length-2],lo[lo.length-1],p)<=0)lo.pop(); lo.push(p);}
+  for(let i=s.length-1;i>=0;i--){const p=s[i];
+    while(up.length>1&&cross(up[up.length-2],up[up.length-1],p)<=0)up.pop(); up.push(p);}
+  lo.pop(); up.pop();
+  return lo.concat(up);
+}
+function expand(hull,d){
+  const cx=hull.reduce((s,p)=>s+p.x,0)/hull.length;
+  const cy=hull.reduce((s,p)=>s+p.y,0)/hull.length;
+  return hull.map(p=>{const dx=p.x-cx,dy=p.y-cy,L=Math.hypot(dx,dy)||1;
+    return {x:p.x+dx/L*d, y:p.y+dy/L*d};});
+}
+
+function loadVariant(name){
+  variant=name;
+  const V=MAP.variants[name];
+  pts=Object.entries(V.points).map(([n,p])=>({
+    name:n, x:p.x, y:p.y, x3:p.x3, y3:p.y3, z3:p.z3,
+    cluster:p.cluster, meta:MAP.meta[n]
+  }));
+  has3d = pts.length>0 && pts[0].x3!==undefined;
+  document.getElementById("t3d").style.display = has3d ? "" : "none";
+  // размер точки — по объёму папки, но сжато, чтобы гиганты не съедали карту
+  const mx=Math.max(...pts.map(p=>p.meta.n_files||1));
+  pts.forEach(p=>{ p.r = 4 + 7*Math.pow((p.meta.n_files||1)/mx, 0.34); });
+
+  hulls=[];
+  for(const c of new Set(pts.map(p=>p.cluster))){
+    const mem=pts.filter(p=>p.cluster===c);
+    if(mem.length<3) continue;
+    hulls.push({cluster:c, poly:expand(convexHull(mem.map(p=>({x:p.x,y:p.y}))), 0.022)});
+  }
+  buildLegend();
+  document.querySelectorAll("#variants button").forEach(b=>
+    b.classList.toggle("on", b.dataset.v===name));
+  draw();
+}
+
+function buildLegend(){
+  const V=MAP.variants[variant], box=document.getElementById("legend");
+  const counts={};
+  pts.forEach(p=>counts[p.cluster]=(counts[p.cluster]||0)+1);
+  box.innerHTML = Object.entries(V.cluster_names)
+    .sort((a,b)=>(counts[b[0]]||0)-(counts[a[0]]||0))
+    .map(([c,n])=>`<div data-c="${c}"><i style="background:${PALETTE[c%PALETTE.length]}"></i>
+      ${n} <span style="color:#586069">(${counts[c]||0})</span></div>`).join("");
+  box.querySelectorAll("div").forEach(d=>d.onclick=()=>{
+    const c=+d.dataset.c, mem=pts.filter(p=>p.cluster===c);
+    if(!mem.length) return;
+    const cx=mem.reduce((s,p)=>s+p.x,0)/mem.length, cy=mem.reduce((s,p)=>s+p.y,0)/mem.length;
+    view.x=innerWidth/2-170-cx*view.k; view.y=innerHeight/2-cy*view.k; draw();
+  });
+}
+
+function matches(p){
+  if(!query) return true;
+  const q=query.toLowerCase();
+  return p.name.toLowerCase().includes(q) ||
+         (p.meta.description||"").toLowerCase().includes(q) ||
+         (MAP.variants[variant].cluster_names[p.cluster]||"").toLowerCase().includes(q);
+}
+
+function draw(){
+  ctx.clearRect(0,0,innerWidth,innerHeight);
+  if(!pts.length) return;
+  if(mode3d) return draw3d();
+  const V=MAP.variants[variant];
+
+  if(show.hulls && show.clusters){
+    for(const h of hulls){
+      const col=PALETTE[h.cluster%PALETTE.length];
+      ctx.beginPath();
+      h.poly.forEach((p,i)=>{const s=toScreen(p); i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y);});
+      ctx.closePath();
+      ctx.fillStyle=col+"14"; ctx.fill();
+      ctx.strokeStyle=col+"2e"; ctx.lineWidth=1; ctx.stroke();
+    }
+    if(view.k>320){
+      // названия кластеров тоже расталкиваем: их два десятка, и без этого
+      // верх карты превращается в кашу из наложенных строк
+      ctx.textAlign="center"; ctx.font="600 12px Segoe UI,sans-serif";
+      const boxes=[];
+      const order=hulls.slice().sort((a,b)=>
+        pts.filter(p=>p.cluster===b.cluster).length - pts.filter(p=>p.cluster===a.cluster).length);
+      for(const h of order){
+        const cx=h.poly.reduce((s,p)=>s+p.x,0)/h.poly.length;
+        const cy=Math.min(...h.poly.map(p=>p.y));
+        const s=toScreen({x:cx,y:cy});
+        const t=(V.cluster_names[h.cluster]||"").toUpperCase();
+        const w=ctx.measureText(t).width, x=s.x-w/2, y=s.y-9;
+        const box={x1:x-6,y1:y-12,x2:x+w+6,y2:y+4};
+        if(boxes.some(b=>!(box.x2<b.x1||box.x1>b.x2||box.y2<b.y1||box.y1>b.y2))) continue;
+        boxes.push(box);
+        ctx.fillStyle=PALETTE[h.cluster%PALETTE.length]+"cc";
+        ctx.fillText(t, s.x, y);
+      }
+    }
+  }
+
+  const dim = !!query;
+  ctx.textAlign="center"; ctx.textBaseline="top";
+
+  // сначала кружки, потом подписи — иначе подписи уходят под соседние точки
+  const wantLabel=[];
+  for(const p of pts){
+    const s=toScreen(p), on=matches(p);
+    const col=colorOf(p);
+    ctx.globalAlpha = dim && !on ? 0.13 : 1;
+
+    if(p===sel){ ctx.beginPath(); ctx.arc(s.x,s.y,p.r+7,0,7); ctx.fillStyle=col+"33"; ctx.fill(); }
+    ctx.beginPath(); ctx.arc(s.x,s.y,p.r,0,7);
+    ctx.fillStyle=col; ctx.fill();
+    if(p.meta.kind!=="folder"){ ctx.strokeStyle="#0e1116"; ctx.lineWidth=2; ctx.stroke(); }
+    if(p===sel||p===hover){ ctx.strokeStyle="#fff"; ctx.lineWidth=2; ctx.stroke(); }
+
+    if(show.labels && (dim ? on : true) && s.x>-150 && s.x<innerWidth+150 && s.y>-40 && s.y<innerHeight+40)
+      wantLabel.push({p,s,priority:(p===sel||p===hover)?2:((dim&&on)?1:0)});
+  }
+  ctx.globalAlpha=1;
+
+  // подписи по приоритету, с пропуском накладывающихся
+  ctx.font="11px Segoe UI,sans-serif";
+  const boxes=[];
+  wantLabel.sort((a,b)=>b.priority-a.priority || b.p.r-a.p.r);
+  for(const {p,s,priority} of wantLabel){
+    const t = p.name.length>26 ? p.name.slice(0,25)+"…" : p.name;
+    const w = ctx.measureText(t).width, x=s.x-w/2, y=s.y+p.r+3;
+    const box={x1:x-3,y1:y-2,x2:x+w+3,y2:y+13};
+    if(priority<2 && boxes.some(b=>!(box.x2<b.x1||box.x1>b.x2||box.y2<b.y1||box.y1>b.y2)))
+      continue;
+    boxes.push(box);
+    ctx.fillStyle = priority===2 ? "#fff" : "#b6c0cc";
+    ctx.fillText(t, s.x, y);
+  }
+}
+
+function draw3d(){
+  const V=MAP.variants[variant], dim=!!query;
+
+  // painter's algorithm: сначала дальние, поверх них ближние
+  const vis=[];
+  for(const p of pts){
+    const s=project3(p);
+    if(s) vis.push({p,s,on:matches(p)});
+  }
+  vis.sort((a,b)=>b.s.depth-a.s.depth);
+
+  for(const {p,s,on} of vis){
+    const r=Math.max(1.2, p.r*s.s);
+    ctx.globalAlpha = dim && !on ? 0.08 : Math.min(1, 0.35+0.65*s.s);
+    ctx.beginPath(); ctx.arc(s.x,s.y,r,0,7);
+    ctx.fillStyle=colorOf(p); ctx.fill();
+    if(p.meta.kind!=="folder"){ ctx.strokeStyle="#0e1116"; ctx.lineWidth=Math.max(1,r*0.35); ctx.stroke(); }
+    if(p===sel||p===hover){
+      ctx.globalAlpha=1;
+      ctx.strokeStyle="#fff"; ctx.lineWidth=2; ctx.stroke();
+      ctx.beginPath(); ctx.arc(s.x,s.y,r+7,0,7);
+      ctx.strokeStyle=colorOf(p)+"88"; ctx.lineWidth=1; ctx.stroke();
+    }
+  }
+  ctx.globalAlpha=1;
+
+  if(!show.labels) return;
+  ctx.font="11px Segoe UI,sans-serif"; ctx.textAlign="center"; ctx.textBaseline="top";
+  const boxes=[];
+  // ближние подписываем первыми — они важнее и имеют приоритет на место
+  for(const {p,s,on} of vis.slice().reverse()){
+    if(dim && !on) continue;
+    const pri = (p===sel||p===hover) ? 2 : 0;
+    const t=p.name.length>24 ? p.name.slice(0,23)+"…" : p.name;
+    const w=ctx.measureText(t).width, x=s.x-w/2, y=s.y+Math.max(1.2,p.r*s.s)+3;
+    const box={x1:x-3,y1:y-2,x2:x+w+3,y2:y+13};
+    if(pri<2 && (s.s<0.55 || boxes.some(b=>!(box.x2<b.x1||box.x1>b.x2||box.y2<b.y1||box.y1>b.y2))))
+      continue;
+    boxes.push(box);
+    ctx.globalAlpha = pri===2 ? 1 : Math.min(1, s.s);
+    ctx.fillStyle = pri===2 ? "#fff" : "#b6c0cc";
+    ctx.fillText(t, s.x, y);
+  }
+  ctx.globalAlpha=1;
+}
+
+/* медленное вращение: на плоском экране объём читается только через движение */
+let spinRAF=null;
+function tickSpin(){
+  spinRAF=null;
+  if(!mode3d || !spin || drag) return;
+  cam.yaw += 0.0016;
+  draw();
+  spinRAF=requestAnimationFrame(tickSpin);
+}
+function startSpin(){ if(mode3d && spin && !spinRAF) spinRAF=requestAnimationFrame(tickSpin); }
+
+/* --- взаимодействие --- */
+function hit(mx,my){
+  let best=null, bd=1e9;
+  for(const p of pts){
+    const s=screenOf(p);
+    if(!s) continue;
+    const r=mode3d ? Math.max(p.r*s.s,7) : p.r;
+    const d=Math.hypot(s.x-mx,s.y-my);
+    if(d<Math.max(r+6,11) && d<bd){bd=d;best=p;}
+  }
+  return best;
+}
+
+let drag=null;
+stage.addEventListener("pointerdown",e=>{
+  drag={x:e.clientX,y:e.clientY,vx:view.x,vy:view.y,
+        yaw:cam.yaw,pitch:cam.pitch,moved:false};
+  stage.setPointerCapture(e.pointerId); stage.classList.add("drag");
+});
+stage.addEventListener("pointermove",e=>{
+  if(drag){
+    const dx=e.clientX-drag.x, dy=e.clientY-drag.y;
+    if(Math.abs(dx)+Math.abs(dy)>3) drag.moved=true;
+    if(mode3d){
+      cam.yaw = drag.yaw + dx*0.006;
+      cam.pitch = Math.max(-1.45, Math.min(1.45, drag.pitch + dy*0.006));
+    }else{
+      view.x=drag.vx+dx; view.y=drag.vy+dy;
+    }
+    draw(); return;
+  }
+  const h=hit(e.clientX,e.clientY);
+  if(h!==hover){hover=h; draw();}
+  if(h){
+    tip.style.display="block";
+    tip.style.left=Math.min(e.clientX+14, innerWidth-300)+"px";
+    tip.style.top=(e.clientY+14)+"px";
+    tip.innerHTML=`<b>${esc(h.name)}</b><br><span style="color:#8b949e">${
+      esc((h.meta.description||"").slice(0,140))}</span>`;
+  } else tip.style.display="none";
+});
+stage.addEventListener("pointerup",e=>{
+  stage.classList.remove("drag");
+  const wasDrag=drag&&drag.moved; drag=null;
+  if(!wasDrag){
+    const h=hit(e.clientX,e.clientY);
+    if(h) select(h); else closeSide();
+  }
+  startSpin();
+});
+stage.addEventListener("wheel",e=>{
+  e.preventDefault();
+  if(mode3d){
+    cam.dist=Math.max(1.15,Math.min(9,cam.dist*Math.exp(e.deltaY*0.0012)));
+    draw(); return;
+  }
+  const f=Math.exp(-e.deltaY*0.0014), nk=Math.max(60,Math.min(30000,view.k*f));
+  const r=nk/view.k;
+  view.x=e.clientX-(e.clientX-view.x)*r;
+  view.y=e.clientY-(e.clientY-view.y)*r;
+  view.k=nk; draw();
+},{passive:false});
+stage.addEventListener("dblclick",e=>{
+  const h=hit(e.clientX,e.clientY);
+  if(h) openItem(h.name);
+});
+
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function select(p){
+  sel=p;
+  const V=MAP.variants[variant], m=p.meta;
+  document.getElementById("s-name").textContent=p.name;
+  document.getElementById("s-kind").textContent =
+    ({folder:"папка",file:"файл",shortcut:"ярлык"}[m.kind]||m.kind) +
+    " · " + (V.cluster_names[p.cluster]||"");
+  const d=document.getElementById("s-desc");
+  d.textContent=m.description||"описания нет — карта разместила эту папку только по имени";
+  d.classList.toggle("empty",!m.description);
+  document.getElementById("desc-editor").style.display="none";
+  document.getElementById("desc-edit").style.display="block";
+  document.getElementById("desc-edit").textContent =
+    m.description ? "изменить описание" : "добавить описание";
+
+  const rows=[["Размер",m.size_human],["Файлов внутри",m.n_files],
+              ["Изменено",m.mtime]];
+  if(m.target) rows.push(["Цель",m.target.split("\\").pop()]);
+  const ext=Object.entries(m.ext_hist||{}).slice(0,4).map(([k,v])=>`${k}×${v}`).join(" ");
+  if(ext) rows.push(["Внутри",ext]);
+  if(m.content_fallback) rows.push(["Содержимое","пусто — только имя"]);
+  document.getElementById("s-rows").innerHTML=rows
+    .map(([a,b])=>`<div class="row"><span>${esc(a)}</span><span>${esc(b)}</span></div>`).join("");
+
+  document.getElementById("s-nb").innerHTML=(V.neighbors[p.name]||[])
+    .map(n=>`<div class="nb" data-n="${esc(n.name)}"><b>${esc(n.name)}</b><i>${n.sim.toFixed(2)}</i></div>`)
+    .join("");
+  document.querySelectorAll("#s-nb .nb").forEach(el=>el.onclick=()=>{
+    const t=pts.find(q=>q.name===el.dataset.n);
+    if(!t) return;
+    select(t);
+    if(!mode3d){
+      view.x=innerWidth/2-170-t.x*view.k; view.y=innerHeight/2-t.y*view.k;
+    }
+    draw();
+  });
+
+  document.getElementById("open").onclick=()=>openItem(p.name);
+  document.getElementById("side").classList.add("open");
+  draw();
+}
+function closeSide(){sel=null;document.getElementById("side").classList.remove("open");draw();}
+
+async function openItem(name){
+  const btn=document.getElementById("open"), old=btn.textContent;
+  btn.disabled=true; btn.textContent="открываю…";
+  try{
+    const r=await fetch("/api/open",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name})});
+    const j=await r.json();
+    btn.textContent = j.ok ? "открыто ✓" : ("не вышло: "+(j.error||""));
+  }catch(e){ btn.textContent="сервер не отвечает"; }
+  setTimeout(()=>{btn.disabled=false; btn.textContent=old;},1600);
+}
+
+/* --- редактирование описания --- *
+ * Описание — это ровно тот текст, из которого считается позиция на карте.
+ * Поэтому для новой папки достаточно написать пару фраз здесь и нажать
+ * «пересчитать»: она сама уедет к своим по смыслу. */
+const descEdit=document.getElementById("desc-edit"),
+      descBox=document.getElementById("desc-editor"),
+      descText=document.getElementById("desc-text");
+
+descEdit.onclick=()=>{
+  if(!sel) return;
+  descText.value=sel.meta.description||"";
+  descBox.style.display="block"; descEdit.style.display="none";
+  descText.focus();
+};
+document.getElementById("desc-cancel").onclick=()=>{
+  descBox.style.display="none"; descEdit.style.display="block";
+};
+document.getElementById("desc-save").onclick=async()=>{
+  if(!sel) return;
+  const btn=document.getElementById("desc-save"), txt=descText.value.trim();
+  btn.disabled=true; btn.textContent="сохраняю…";
+  try{
+    const r=await fetch("/api/describe",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name:sel.name,description:txt})});
+    const j=await r.json();
+    if(j.ok){
+      sel.meta.description=txt; MAP.meta[sel.name].description=txt;
+      select(sel);
+      note("Описание сохранено. Нажми «пересчитать», чтобы точка переехала на своё место.");
+    }else note("Не сохранилось: "+(j.error||""),true);
+  }catch(e){ note("Сервер не отвечает",true); }
+  btn.disabled=false; btn.textContent="сохранить";
+};
+
+/* --- пересчёт карты --- */
+const prog=document.getElementById("progress");
+function note(text,isErr){
+  document.getElementById("p-step").textContent=text;
+  document.getElementById("p-note").textContent="";
+  prog.classList.add("show"); prog.classList.toggle("err",!!isErr);
+  clearTimeout(note._t); note._t=setTimeout(()=>prog.classList.remove("show"),6000);
+}
+document.getElementById("rebuild").onclick=async()=>{
+  const chip=document.getElementById("rebuild");
+  if(chip.classList.contains("on")) return;
+  chip.classList.add("on");
+  try{
+    const r=await fetch("/api/rebuild",{method:"POST",
+      headers:{"Content-Type":"application/json"},body:"{}"});
+    if(!r.ok){ note("Уже считается",true); chip.classList.remove("on"); return; }
+  }catch(e){ note("Сервер не отвечает",true); chip.classList.remove("on"); return; }
+
+  clearTimeout(note._t);
+  prog.classList.add("show"); prog.classList.remove("err");
+  document.getElementById("p-note").textContent =
+    "первый раз это ~10 минут, дальше быстрее — считается только то, что изменилось";
+
+  const poll=setInterval(async()=>{
+    let s;
+    try{ s=await (await fetch("/api/rebuild/status")).json(); }catch(e){ return; }
+    document.getElementById("p-step").textContent=s.step||"Считаю…";
+    if(s.state==="done"){
+      clearInterval(poll); chip.classList.remove("on");
+      const keep=variant, hadSel=sel&&sel.name;
+      const m=await (await fetch("data/map.json?"+Date.now())).json();
+      MAP=m;
+      loadVariant(MAP.variants[keep]?keep:Object.keys(MAP.variants)[0]);
+      if(hadSel){ const t=pts.find(p=>p.name===hadSel); if(t) select(t); else closeSide(); }
+      note("Карта пересчитана в "+s.finished_at);
+    }else if(s.state==="failed"){
+      clearInterval(poll); chip.classList.remove("on");
+      note("Пересчёт не удался: "+(s.step||""),true);
+      console.log(s.log);
+    }
+  },1500);
+};
+
+/* --- панель --- */
+document.getElementById("close").onclick=closeSide;
+document.getElementById("q").oninput=e=>{query=e.target.value.trim();draw();};
+document.getElementById("fit").onclick=()=>fit();
+
+document.getElementById("t3d").onclick=e=>{
+  mode3d=!mode3d;
+  e.target.classList.toggle("on",mode3d);
+  // области кластеров рисуются только в 2D — в объёме от них каша
+  document.getElementById("tHulls").style.display=mode3d?"none":"";
+  document.getElementById("hint").textContent = mode3d
+    ? "тащить — вращать · колесо — приблизить · клик — карточка · пробел — вращение"
+    : "колесо — зум · тащить — двигать · клик — карточка";
+  if(mode3d) startSpin();
+  fit(false); draw();
+};
+addEventListener("keydown",e=>{
+  if(e.code==="Space" && mode3d && document.activeElement.id!=="q"){
+    e.preventDefault(); spin=!spin; startSpin();
+  }
+});
+for(const [id,key] of [["tLabels","labels"],["tClusters","clusters"],
+                       ["tHulls","hulls"],["tLegend","legend"]]){
+  document.getElementById(id).onclick=e=>{
+    show[key]=!show[key]; e.target.classList.toggle("on",show[key]);
+    if(key==="legend") document.getElementById("legend").classList.toggle("hide",!show.legend);
+    if(key==="clusters"){
+      // без кластеров легенда и области бессмысленны — прячем их вместе
+      document.getElementById("legend").classList.toggle("hide",!show.legend||!show.clusters);
+      document.getElementById("tHulls").style.opacity=show.clusters?1:.4;
+      document.getElementById("tLegend").style.opacity=show.clusters?1:.4;
+    }
+    draw();
+  };
+}
+addEventListener("keydown",e=>{
+  if(e.key==="Escape") closeSide();
+  if(e.key==="/"&&document.activeElement.id!=="q"){e.preventDefault();document.getElementById("q").focus();}
+});
+
+fetch("data/map.json").then(r=>r.json()).then(m=>{
+  MAP=m;
+  document.getElementById("variants").innerHTML=Object.keys(m.variants)
+    .map(v=>`<button data-v="${v}">${v}</button>`).join("");
+  document.querySelectorAll("#variants button").forEach(b=>
+    b.onclick=()=>{loadVariant(b.dataset.v); if(sel){const t=pts.find(p=>p.name===sel.name); if(t)select(t);}});
+  resize();
+
+  // состояние можно задать ссылкой: ?3d, ?v=содержимое — удобно и для скриншотов,
+  // и чтобы кинуть кому-то ровно тот вид, который смотришь сам
+  const q=new URLSearchParams(location.search);
+  const wantV=q.get("v");
+  loadVariant(m.variants[wantV] ? wantV : Object.keys(m.variants)[0]);
+  if((q.has("3d") || location.hash==="#3d") && has3d) document.getElementById("t3d").click();
+  if(q.has("nospin")) spin=false;
+
+  fit(false);
+}).catch(e=>{
+  document.body.insertAdjacentHTML("beforeend",
+    `<div style="position:absolute;inset:0;display:grid;place-items:center;text-align:center">
+       <div><h2>Нет data/map.json</h2>
+       <p style="color:#8b949e">Запусти <code>serve.py</code> из папки проекта —<br>
+       он отдаёт карту и умеет открывать папки по клику.</p></div></div>`);
+});
+</script>
+</body>
+</html>
