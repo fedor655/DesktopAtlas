@@ -13,7 +13,9 @@
     python desktop_icons.py apply <layout.json>  — расставить по раскладке (сначала делает бекап)
     python desktop_icons.py restore <файл.json>  — вернуть позиции из бекапа
     python desktop_icons.py freeform on|off      — выключить/включить "упорядочить автоматически" и "выровнять по сетке"
-    python desktop_icons.py spacing <cx> <cy>    — шаг сетки значков в px (меньше = больше влезает)
+    python desktop_icons.py spacing <cx> <cy>    — шаг сетки значков в px (до перезапуска проводника)
+    python desktop_icons.py iconsize [px]        — настоящий размер значков: без аргумента показать, с аргументом сменить
+    python desktop_icons.py restart-explorer     — перезапустить проводник, чтобы размер применился
 
 Ничего не перемещает и не удаляет на диске — меняются только координаты иконок.
 """
@@ -21,6 +23,7 @@
 import os
 import sys
 import json
+import time
 import ctypes
 import ctypes.wintypes as w
 from datetime import datetime
@@ -452,6 +455,87 @@ def cmd_spacing(cx, cy):
         print("(Windows подправила значения до минимально допустимых)")
 
 
+def cmd_iconsize(size=None):
+    """
+    Настоящий размер значков рабочего стола — тот, что меняется Ctrl+колесо.
+
+    В отличие от `spacing`, живёт в реестре и переживает перезапуск проводника.
+    Размер задаётся в логических пикселях: 32 — мелкие, 48 — обычные,
+    96 — крупные. При масштабе экрана 150% логические 32 превращаются
+    в 48 физических, поэтому «мелкие» на таком экране выглядят как обычные.
+
+    Отступы сетки уменьшаются пропорционально, иначе значки станут мелкими,
+    а места занимать будут столько же.
+    """
+    import winreg
+
+    bags = r"Software\Microsoft\Windows\Shell\Bags\1\Desktop"
+    metrics = r"Control Panel\Desktop\WindowMetrics"
+
+    def read():
+        cur = {}
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, bags) as k:
+            try:
+                cur["IconSize"] = winreg.QueryValueEx(k, "IconSize")[0]
+            except FileNotFoundError:
+                cur["IconSize"] = 48
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, metrics) as k:
+            for name in ("IconSpacing", "IconVerticalSpacing"):
+                try:
+                    cur[name] = winreg.QueryValueEx(k, name)[0]
+                except FileNotFoundError:
+                    cur[name] = "-1125"
+        return cur
+
+    cur = read()
+    dpi = user32.GetDpiForSystem() if hasattr(user32, "GetDpiForSystem") else 96
+    scale = dpi / 96
+
+    if size is None:
+        print(f"Размер значка: {cur['IconSize']} логических px "
+              f"({round(cur['IconSize']*scale)} физических при масштабе {round(scale*100)}%)")
+        print(f"Отступы сетки: {cur['IconSpacing']} / {cur['IconVerticalSpacing']} twips "
+              f"(-1125 = стандартные 75 px)")
+        print("\nПоменять:  python desktop_icons.py iconsize 32")
+        return
+
+    # 15 twips на логический пиксель.
+    # По горизонтали значку нужно заметно больше собственной ширины: там подпись,
+    # и если дать впритык, имена папок обрежутся до пары букв. По вертикали
+    # закладываем две строки текста под значком.
+    h_twips = -max(600, int((size + 26) * 15))
+    v_twips = -max(750, int((size + 40) * 15))
+
+    backup = os.path.join(BACKUPS, datetime.now().strftime("iconsize_%Y-%m-%d_%H-%M-%S.json"))
+    json.dump(cur, open(backup, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, bags, 0, winreg.KEY_SET_VALUE) as k:
+        winreg.SetValueEx(k, "IconSize", 0, winreg.REG_DWORD, int(size))
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, metrics, 0, winreg.KEY_SET_VALUE) as k:
+        winreg.SetValueEx(k, "IconSpacing", 0, winreg.REG_SZ, str(h_twips))
+        winreg.SetValueEx(k, "IconVerticalSpacing", 0, winreg.REG_SZ, str(v_twips))
+
+    print(f"Размер значка: {cur['IconSize']} -> {size} логических px")
+    print(f"Отступы сетки: {cur['IconSpacing']} -> {h_twips} / "
+          f"{cur['IconVerticalSpacing']} -> {v_twips} twips")
+    print(f"Старые значения: {os.path.basename(backup)}")
+    print("\nЧтобы применилось, нужен перезапуск проводника — он сбросит позиции значков,")
+    print("поэтому раскладку после него надо наложить заново:")
+    print("  python desktop_icons.py restart-explorer")
+    print("  python layout_desktop.py описание --grid")
+    print("  python desktop_icons.py apply data/layout.json")
+
+
+def cmd_restart_explorer():
+    """Перезапускает проводник, чтобы подхватились размеры значков."""
+    import subprocess
+    subprocess.run(["taskkill", "/f", "/im", "explorer.exe"], capture_output=True)
+    time.sleep(1.5)
+    subprocess.Popen(["explorer.exe"])
+    print("Проводник перезапущен. Подожди пару секунд, пока появится рабочий стол.")
+    time.sleep(4)
+
+
 def cmd_freeform(mode):
     defview, lv = find_desktop_listview()
     st = get_state(defview, lv)
@@ -483,6 +567,10 @@ def main():
         cmd_freeform(sys.argv[2])
     elif cmd == "spacing" and len(sys.argv) > 3:
         cmd_spacing(int(sys.argv[2]), int(sys.argv[3]))
+    elif cmd == "iconsize":
+        cmd_iconsize(int(sys.argv[2]) if len(sys.argv) > 2 else None)
+    elif cmd == "restart-explorer":
+        cmd_restart_explorer()
     else:
         print(__doc__)
 
