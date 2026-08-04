@@ -16,6 +16,9 @@
     python desktop_icons.py spacing <cx> <cy>    — шаг сетки значков в px (до перезапуска проводника)
     python desktop_icons.py iconsize [px]        — настоящий размер значков: без аргумента показать, с аргументом сменить
     python desktop_icons.py restart-explorer     — перезапустить проводник, чтобы размер применился
+    python desktop_icons.py autostart install    — восстанавливать сетку, раскладку и сервер при входе в систему
+    python desktop_icons.py autostart remove     — снять автозапуск
+    python desktop_icons.py autostart status     — проверить, стоит ли
 
 Ничего не перемещает и не удаляет на диске — меняются только координаты иконок.
 """
@@ -28,7 +31,10 @@ import ctypes
 import ctypes.wintypes as w
 from datetime import datetime
 
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+# Под pythonw.exe консоли нет и sys.stdout == None — без этой проверки
+# reconfigure падает прямо на импорте, причём молча.
+if sys.stdout is not None:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BACKUPS = os.path.join(HERE, "backups")
@@ -370,9 +376,28 @@ def cmd_backup(quiet=False):
     }
     path = os.path.join(BACKUPS, datetime.now().strftime("icons_%Y-%m-%d_%H-%M-%S.json"))
     json.dump(blob, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    prune_backups()
     if not quiet:
         print(f"Сохранено {len(icons)} позиций -> {path}")
     return path
+
+
+def prune_backups(keep=40):
+    """
+    Оставляет только последние снимки позиций.
+
+    Автозапуск делает бекап при каждом входе в систему, так что без чистки
+    папка растёт бесконечно. Самый старый файл не трогаем никогда — это
+    исходное состояние стола до всех перестановок.
+    """
+    files = sorted(f for f in os.listdir(BACKUPS) if f.startswith("icons_"))
+    if len(files) <= keep:
+        return
+    for name in files[1:len(files) - keep + 1]:
+        try:
+            os.remove(os.path.join(BACKUPS, name))
+        except OSError:
+            pass
 
 
 def cmd_restore(path):
@@ -536,6 +561,88 @@ def cmd_restart_explorer():
     time.sleep(4)
 
 
+def startup_folder():
+    return os.path.join(os.environ["APPDATA"], "Microsoft", "Windows",
+                        "Start Menu", "Programs", "Startup")
+
+
+AUTOSTART_FILE = "DesktopAtlas.vbs"
+
+
+def cmd_autostart(action):
+    """
+    Запуск startup.py при входе в систему через папку «Автозагрузка».
+
+    Планировщик заданий подошёл бы лучше (там есть задержка старта), но
+    задачи с триггером «при входе в систему» он создаёт только с правами
+    администратора. Папка автозагрузки прав не требует, а задержка нам и не
+    нужна: startup.py сам ждёт, пока проводник построит рабочий стол.
+
+    Запускаем через .vbs, а не .bat, чтобы при входе не мелькало чёрное окно
+    консоли.
+    """
+    path = os.path.join(startup_folder(), AUTOSTART_FILE)
+
+    if action == "status":
+        if os.path.exists(path):
+            print(f"Автозапуск установлен: {path}")
+            log_path = os.path.join(HERE, "logs", "startup.log")
+            if os.path.exists(log_path):
+                tail = open(log_path, encoding="utf-8").read().strip().splitlines()[-4:]
+                print("\nПоследние записи журнала:")
+                for line in tail:
+                    print("  " + line)
+        else:
+            print("Автозапуск не установлен.")
+            print("Поставить:  python desktop_icons.py autostart install")
+        return
+
+    if action == "remove":
+        if os.path.exists(path):
+            os.remove(path)
+            print("Автозапуск снят.")
+        else:
+            print("Автозапуска не было — снимать нечего.")
+        return
+
+    if action != "install":
+        print("autostart install | remove | status")
+        return
+
+    startup = os.path.join(HERE, "startup.py")
+    if not os.path.exists(startup):
+        print(f"Нет {startup}")
+        return
+
+    exe = sys.executable
+    quiet = exe.replace("python.exe", "pythonw.exe")
+    if os.path.exists(quiet):
+        exe = quiet
+
+    vbs = (
+        "' Desktop Atlas — восстановление раскладки рабочего стола при входе.\n"
+        "' Снять: python desktop_icons.py autostart remove\n"
+        'Set sh = CreateObject("WScript.Shell")\n'
+        f'sh.CurrentDirectory = "{HERE}"\n'
+        f'sh.Run """{exe}"" ""{startup}""", 0, False\n'
+    )
+    os.makedirs(startup_folder(), exist_ok=True)
+    # Именно UTF-16: wscript читает .vbs либо как ANSI, либо как UTF-16 с BOM.
+    # В UTF-8 кириллица в пути превратится в мусор, и скрипт молча не запустится.
+    with open(path, "w", encoding="utf-16") as f:
+        f.write(vbs)
+
+    print(f"Автозапуск установлен: {path}")
+    print(f"  запускает: {os.path.basename(exe)} startup.py")
+    print("\nПри каждом входе в систему будет:")
+    print("  1) возвращён шаг сетки значков (Windows сбрасывает его сама)")
+    print("  2) наложена раскладка из data/layout.json")
+    print("  3) поднят сервер вьювера на http://127.0.0.1:8777/")
+    print("\nНастройки — в data/state.json, журнал — в logs/startup.log")
+    print("Проверить сейчас:  python startup.py")
+    print("Снять:             python desktop_icons.py autostart remove")
+
+
 def cmd_freeform(mode):
     defview, lv = find_desktop_listview()
     st = get_state(defview, lv)
@@ -571,6 +678,8 @@ def main():
         cmd_iconsize(int(sys.argv[2]) if len(sys.argv) > 2 else None)
     elif cmd == "restart-explorer":
         cmd_restart_explorer()
+    elif cmd == "autostart":
+        cmd_autostart(sys.argv[2] if len(sys.argv) > 2 else "status")
     else:
         print(__doc__)
 

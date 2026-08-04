@@ -21,7 +21,10 @@ import time
 import subprocess
 from datetime import datetime
 
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+# Под pythonw.exe консоли нет и sys.stdout == None — без этой проверки
+# reconfigure падает прямо на импорте, причём молча.
+if sys.stdout is not None:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 DESKTOP = os.path.join(os.path.expanduser("~"), "OneDrive", "Рабочий стол")
 # Windows показывает на столе объединение личной и общей папок

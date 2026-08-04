@@ -33,7 +33,10 @@ import math
 
 import numpy as np
 
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+# Под pythonw.exe консоли нет и sys.stdout == None — без этой проверки
+# reconfigure падает прямо на импорте, причём молча.
+if sys.stdout is not None:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(HERE, "data")

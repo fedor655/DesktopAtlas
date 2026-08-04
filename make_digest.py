@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 """Компактная выжимка items.json — чтобы человек (или модель) мог написать описания."""
 import json, os, sys
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+# Под pythonw.exe консоли нет и sys.stdout == None — без этой проверки
+# reconfigure падает прямо на импорте, причём молча.
+if sys.stdout is not None:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
