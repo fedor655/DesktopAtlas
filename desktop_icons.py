@@ -418,17 +418,26 @@ def cmd_restore(path):
         print(f"Не нашлось на рабочем столе ({len(missed)}): {', '.join(missed[:8])}")
 
 
-def cmd_apply(layout_path):
+def cmd_apply(layout_path, quiet=False):
+    """
+    quiet — режим для сторожа: без бекапа и без вывода.
+
+    Бекап перед автоматическим возвратом бессмыслен: раскладка и так лежит
+    в layout.json, а сохранять «как было после того, как проводник всё
+    перемешал» незачем — именно это состояние мы и чиним.
+    """
     layout = json.load(open(layout_path, encoding="utf-8"))
     defview, lv = find_desktop_listview()
     st = get_state(defview, lv)
     if st["auto_arrange"]:
-        print("Включено 'Упорядочить значки автоматически' — раскладка не удержится.")
-        print("Сначала: python desktop_icons.py freeform on")
+        if not quiet:
+            print("Включено 'Упорядочить значки автоматически' — раскладка не удержится.")
+            print("Сначала: python desktop_icons.py freeform on")
         return
 
-    backup = cmd_backup(quiet=True)
-    print(f"Бекап текущих позиций: {os.path.basename(backup)}")
+    if not quiet:
+        backup = cmd_backup(quiet=True)
+        print(f"Бекап текущих позиций: {os.path.basename(backup)}")
 
     icons = read_icons(lv)
     # Проводник может прятать расширения, а в самих именах встречаются точки
@@ -450,12 +459,15 @@ def cmd_apply(layout_path):
             continue
         plan[idx] = (rec["x"], rec["y"])
 
-    left = set_positions(lv, plan, defview, verbose=True)
+    left = set_positions(lv, plan, defview, verbose=not quiet)
+    if quiet:
+        return left
     print(f"Расставлено {len(plan)-left} иконок из {len(plan)} "
           f"по раскладке '{layout.get('variant','?')}'")
     if missed:
         print(f"Не нашлось на рабочем столе ({len(missed)}): {', '.join(missed[:8])}")
     print(f"Откат: python desktop_icons.py restore \"{backup}\"")
+    return left
 
 
 def cmd_spacing(cx, cy):

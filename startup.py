@@ -39,6 +39,7 @@ DEFAULT_STATE = {
     "layout": "data/layout.json",
     "serve": True,
     "port": 8777,
+    "watch": True,
 }
 
 
@@ -130,7 +131,12 @@ def main():
         if port_busy(int(state["port"])):
             log(f"порт {state['port']} уже занят — сервер, видимо, поднят")
         else:
-            start_server()
+            spawn("serve.py", ["--no-browser"], "сервер вьювера")
+
+    # 4. Сторож раскладки: проводник переупаковывает значки, когда на столе
+    #    появляется что-то новое, и раскладка рассыпается сама собой.
+    if state.get("watch", True):
+        spawn("watch.py", [], "сторож раскладки")
 
     log("готово")
     return 0
@@ -143,8 +149,8 @@ def port_busy(port):
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
-def start_server():
-    """Поднимает serve.py отдельным процессом без консольного окна."""
+def spawn(script, args, what):
+    """Запускает скрипт отдельным процессом без консольного окна."""
     exe = sys.executable
     quiet = exe.replace("python.exe", "pythonw.exe")
     if os.path.exists(quiet):
@@ -154,15 +160,15 @@ def start_server():
     DETACHED = 0x00000008
     try:
         subprocess.Popen(
-            [exe, os.path.join(HERE, "serve.py"), "--no-browser"],
+            [exe, os.path.join(HERE, script)] + args,
             cwd=HERE,
             creationflags=CREATE_NO_WINDOW | DETACHED,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
-        log("сервер вьювера запущен")
+        log(f"{what} запущен")
     except OSError as e:
-        log(f"сервер не запустился: {e}")
+        log(f"{what} не запустился: {e}")
 
 
 if __name__ == "__main__":
