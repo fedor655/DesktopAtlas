@@ -196,7 +196,7 @@ def decommon(X):
     return Y / n
 
 
-def pick_k(X, n_items, per_cluster=(7, 15)):
+def pick_k(X, n_items, per_cluster=(6, 10)):
     """
     Число кластеров.
 

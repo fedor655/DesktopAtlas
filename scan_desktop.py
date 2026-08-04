@@ -26,9 +26,26 @@ from datetime import datetime
 if sys.stdout is not None:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-DESKTOP = os.path.join(os.path.expanduser("~"), "OneDrive", "Рабочий стол")
-# Windows показывает на столе объединение личной и общей папок
-PUBLIC_DESKTOP = os.path.join(os.environ.get("PUBLIC", r"C:\Users\Public"), "Desktop")
+def default_desktop():
+    """Личная папка рабочего стола — с учётом переноса в OneDrive."""
+    home = os.path.expanduser("~")
+    for candidate in (os.path.join(home, "OneDrive", "Рабочий стол"),
+                      os.path.join(home, "OneDrive", "Desktop"),
+                      os.path.join(home, "Рабочий стол"),
+                      os.path.join(home, "Desktop")):
+        if os.path.isdir(candidate):
+            return candidate
+    return os.path.join(home, "Desktop")
+
+
+# Путь можно передать аргументом: так сканируется демо-стол вместо настоящего.
+CUSTOM = len(sys.argv) > 1 and not sys.argv[1].startswith("-")
+DESKTOP = os.path.abspath(sys.argv[1]) if CUSTOM else default_desktop()
+
+# Windows показывает на столе объединение личной и общей папок — но только
+# для настоящего стола: у произвольной папки никакой «общей части» нет.
+PUBLIC_DESKTOP = ("" if CUSTOM else
+                  os.path.join(os.environ.get("PUBLIC", r"C:\Users\Public"), "Desktop"))
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "data")
 os.makedirs(OUT, exist_ok=True)
@@ -206,12 +223,12 @@ def main():
         return
 
     shortcuts = resolve_shortcuts(DESKTOP)
-    if os.path.isdir(PUBLIC_DESKTOP):
+    if PUBLIC_DESKTOP and os.path.isdir(PUBLIC_DESKTOP):
         shortcuts.update(resolve_shortcuts(PUBLIC_DESKTOP))
     print(f"Ярлыков развёрнуто: {len(shortcuts)}")
 
     entries = sorted(os.scandir(DESKTOP), key=lambda e: (not e.is_dir(), e.name.lower()))
-    if os.path.isdir(PUBLIC_DESKTOP):
+    if PUBLIC_DESKTOP and os.path.isdir(PUBLIC_DESKTOP):
         entries += sorted(os.scandir(PUBLIC_DESKTOP), key=lambda e: e.name.lower())
     items = []
     seen = set()
