@@ -278,20 +278,29 @@ def set_positions(lv, index_to_xy, defview=None, verbose=False):
                 return True
         return False
 
+    # Ячейки, куда кто-то целится. Парковать в них нельзя: временный жилец
+    # займёт чужое место, и вместо одного затора получим два.
+    targets = list(index_to_xy.values())
+
+    def is_target(tx, ty):
+        return any(abs(x - tx) < near_x and abs(y - ty) < near_y for x, y in targets)
+
     def free_spot():
-        """Любая свободная ячейка в стороне — временная парковка."""
+        """Свободная ячейка, которая при этом не является ничьей целью."""
         x0 = st.get("area_x", 0) + 4
         y0 = st.get("area_y", 0) + 2
         for r in range(st.get("area_h", 1000) // ch):
             for c in range(st.get("area_w", 1000) // cw):
                 tx, ty = x0 + c * cw, y0 + r * ch
-                if not occupied(tx, ty, None):
+                if not occupied(tx, ty, None) and not is_target(tx, ty):
                     return tx, ty
         return None
 
     waves = parked = 0
     with RemoteBuffer(lv) as rb:
-        while pending and waves < 200:
+        # запаса по проходам должно хватать на длинные цепочки перестановок:
+        # при плотной раскладке каждая волна двигает лишь несколько значков
+        while pending and waves < 600:
             moved = []
             for idx, (tx, ty) in list(pending.items()):
                 if occupied(tx, ty, idx):

@@ -55,12 +55,51 @@ def log(msg, echo=True):
         pass
 
 
+LAYOUT_PATH = os.path.join(HERE, "data", "layout.json")
+
+
 def load_layout():
-    path = os.path.join(HERE, "data", "layout.json")
-    if not os.path.exists(path):
-        return None
-    blob = json.load(open(path, encoding="utf-8"))
-    return {r["name"]: (r["x"], r["y"]) for r in blob["positions"]}
+    if not os.path.exists(LAYOUT_PATH):
+        return None, None
+    blob = json.load(open(LAYOUT_PATH, encoding="utf-8"))
+    return ({r["name"]: (r["x"], r["y"]) for r in blob["positions"]},
+            blob.get("geometry", {}))
+
+
+def fix_spacing(lv, defview, want_w, want_h):
+    """
+    Возвращает шаг сетки, под который считалась раскладка.
+
+    Без этого сторож бессилен: если Windows сбросила шаг (а она это делает
+    при перезапуске проводника и при смене конфигурации мониторов), координаты
+    раскладки перестают попадать в узлы её сетки. Каждый возврат округляется
+    не туда, и сторож крутится вхолостую до бесконечности.
+    """
+    from desktop_icons import get_state, user32
+    st = get_state(defview, lv)
+    if (st["cell_w"], st["cell_h"]) == (want_w, want_h):
+        return False
+    LVM_SETICONSPACING = 0x1000 + 53
+    user32.SendMessageW(lv, LVM_SETICONSPACING, 0,
+                        (int(want_h) << 16) | (int(want_w) & 0xFFFF))
+    time.sleep(1.0)
+    now = get_state(defview, lv)
+    log(f"шаг сетки был {st['cell_w']}x{st['cell_h']}, вернул "
+        f"{now['cell_w']}x{now['cell_h']}")
+    return True
+
+
+def rebuild_layout():
+    """Пересчитывает раскладку под текущую геометрию экранов."""
+    import subprocess
+    log("геометрия экрана изменилась — пересчитываю раскладку")
+    r = subprocess.run([sys.executable, os.path.join(HERE, "layout_desktop.py"),
+                        "описание", "--grid"], cwd=HERE, capture_output=True,
+                       env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    if r.returncode != 0:
+        log(f"пересчёт не удался: {r.stderr.decode('utf-8', 'replace')[-300:]}")
+        return False
+    return True
 
 
 def drift(want, current):
@@ -126,26 +165,49 @@ def main():
         if other:
             log(f"сторож уже работает (pid {other}) — выхожу")
             return 0
-    want = load_layout()
+    want, geom = load_layout()
     if not want:
         log("нет data/layout.json — сначала layout_desktop.py")
         return 1
 
-    layout_path = os.path.join(HERE, "data", "layout.json")
+    layout_path = LAYOUT_PATH
     log(f"сторож запущен: {len(want)} значков под присмотром, "
         f"порог {DRIFT_TRIGGER}, опрос раз в {POLL_SECONDS}с")
 
     last_fix = 0.0
     known = None
+    failures = 0          # сколько раз подряд возврат не сошёлся
 
     while True:
         try:
+            from desktop_icons import get_state
             defview, lv = find_desktop_listview()
+            st = get_state(defview, lv)
             current = {n: (x, y) for _, n, x, y in read_icons(lv)}
         except Exception as e:
             log(f"рабочий стол недоступен ({e}), жду")
             time.sleep(POLL_SECONDS * 2)
             continue
+
+        # Сменилась конфигурация экранов — старые координаты больше не годятся,
+        # раскладку надо считать заново, а не возвращать.
+        if geom and (st["area_w"], st["area_h"]) != (geom.get("area_w"),
+                                                     geom.get("area_h")):
+            log(f"область экрана была {geom.get('area_w')}x{geom.get('area_h')}, "
+                f"стала {st['area_w']}x{st['area_h']}")
+            if rebuild_layout():
+                want, geom = load_layout()
+                failures = 0
+                last_fix = 0.0
+
+        # Шаг сетки Windows сбрасывает при перезапуске проводника и при смене
+        # мониторов. Пока он не тот, возвращать позиции бесполезно: система
+        # округлит их к своим узлам, и сторож будет крутиться вхолостую.
+        if geom and geom.get("cell_w"):
+            if fix_spacing(lv, defview, geom["cell_w"], geom["cell_h"]):
+                time.sleep(1.0)
+                current = {n: (x, y) for _, n, x, y in read_icons(lv)}
+                last_fix = 0.0
 
         # появление новых элементов само по себе не повод двигать чужие значки,
         # но о нём стоит знать: в карте их ещё нет
@@ -167,6 +229,20 @@ def main():
                     last_fix = time.time()
                     left = drift(want, {n: (x, y) for _, n, x, y in read_icons(lv)})
                     log(f"после возврата не на месте: {len(left)}")
+
+                    # Если возврат раз за разом не сходится, значит мешает что-то,
+                    # чего мы не понимаем. Молотить вхолостую хуже, чем отступить:
+                    # уходим в долгую паузу, чтобы не грузить систему и не мешать.
+                    if len(left) >= len(off) * 0.8:
+                        failures += 1
+                        if failures >= 3:
+                            log("три попытки подряд без толку — отступаю на 10 минут. "
+                                "Похоже, нужна ручная пересборка: "
+                                "layout_desktop.py описание --grid")
+                            time.sleep(600)
+                            failures = 0
+                    else:
+                        failures = 0
                 except Exception as e:
                     log(f"вернуть не вышло: {e}")
         elif off:
