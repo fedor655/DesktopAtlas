@@ -1,51 +1,32 @@
 @echo off
-chcp 65001 >nul
-title Desktop Atlas
+rem ---------------------------------------------------------------------
+rem  Desktop Atlas launcher.
+rem
+rem  ASCII only, on purpose. cmd.exe reads a .bat byte by byte in the
+rem  console codepage, so UTF-8 Cyrillic desynchronises the parser:
+rem  "set PORT=8777" silently fails and every echo turns into garbage.
+rem  All human-facing text lives in startup.py, which speaks UTF-8 fine.
+rem ---------------------------------------------------------------------
+
 cd /d "%~dp0"
+set "PYTHONIOENCODING=utf-8"
 
-set PORT=8777
-set PYTHONIOENCODING=utf-8
-
-rem Если сервер уже поднят - просто открываем вкладку и выходим.
-netstat -ano | findstr /r /c:"LISTENING" | findstr /c:"127.0.0.1:%PORT%" >nul
-if %errorlevel%==0 (
-    echo Сервер уже запущен.
-    start "" "http://127.0.0.1:%PORT%/"
-    timeout /t 2 >nul
-    exit /b 0
+rem Find the interpreter. The neighbouring project has a Cyrillic name, which
+rem must not appear in this file, so we scan sibling folders one level deep.
+rem A recursive search is not an option here: the desktop next door holds
+rem tens of gigabytes.
+set "PY="
+if exist ".venv\Scripts\python.exe" set "PY=%CD%\.venv\Scripts\python.exe"
+if not defined PY for /d %%D in ("..\*") do (
+    if not defined PY if exist "%%~fD\socanalytic\venv\Scripts\python.exe" set "PY=%%~fD\socanalytic\venv\Scripts\python.exe"
 )
+if not defined PY for /f "delims=" %%P in ('where python 2^>nul') do if not defined PY set "PY=%%P"
 
-rem Ищем интерпретатор: сначала своё окружение, потом соседнее от соц аналитика,
-rem в последнюю очередь - системный python.
-set PY=
-if exist ".venv\Scripts\python.exe" set PY=.venv\Scripts\python.exe
-if not defined PY if exist "..\соц аналитик\socanalytic\venv\Scripts\python.exe" (
-    set PY=..\соц аналитик\socanalytic\venv\Scripts\python.exe
-)
 if not defined PY (
-    where python >nul 2>nul
-    if %errorlevel%==0 set PY=python
-)
-if not defined PY (
-    echo.
-    echo Не нашёл Python. Установи его или положи окружение в .venv рядом с этим файлом.
+    echo Python not found. Install it, or put a virtualenv in .venv next to this file.
     pause
     exit /b 1
 )
 
-if not exist "data\map.json" (
-    echo.
-    echo Карты ещё нет. Считаю с нуля - это займёт около десяти минут.
-    echo.
-    "%PY%" scan_desktop.py || goto :fail
-    "%PY%" build_map.py    || goto :fail
-)
-
-echo Запускаю сервер на http://127.0.0.1:%PORT%/
-"%PY%" serve.py
-goto :eof
-
-:fail
-echo.
-echo Что-то пошло не так - смотри сообщение выше.
-pause
+"%PY%" startup.py --open
+if errorlevel 1 pause

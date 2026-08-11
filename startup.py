@@ -138,6 +138,12 @@ def main():
     if state.get("watch", True):
         spawn("watch.py", [], "сторож раскладки")
 
+    if "--open" in sys.argv:
+        import webbrowser
+        url = f"http://127.0.0.1:{state['port']}/"
+        log(f"открываю {url}")
+        webbrowser.open(url)
+
     log("готово")
     return 0
 

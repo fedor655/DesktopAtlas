@@ -256,82 +256,113 @@ def set_positions(lv, index_to_xy, defview=None, verbose=False):
     index -> (x, y).
 
     Тонкость: при включённом «выровнять значки по сетке» (а выключить его
-    сообщением извне Windows не даёт) система не кладёт значок в ячейку,
-    которую прямо сейчас занимает другой значок, — отпихивает в соседнюю.
-    Поэтому нельзя просто пройти списком: половина раскладки разъедется.
+    сообщением извне Windows не даёт) система не кладёт значок в клетку,
+    которую прямо сейчас занимает другой, — отпихивает в соседнюю. Значит
+    порядок перестановок важен: сначала освободить клетку, потом занимать.
 
-    Переставляем волнами: на каждом проходе двигаем только тех, чья целевая
-    ячейка уже свободна. Освободившиеся места открывают дорогу следующим.
-    Если волна встала (значки ждут друг друга по кругу), уводим одного из них
-    на свободную ячейку-времянку — цикл рвётся, и процесс идёт дальше.
+    Раньше это решалось волнами с перечиткой позиций у проводника после
+    каждого прохода. Оказалось негодно: отвечает он с задержкой, модель
+    занятости расходилась с правдой, и вместо распутывания цепочек
+    начиналась толчея — две сотни парковок и десятки непоставленных значков.
+
+    Теперь вся перестановка планируется в памяти по одному снимку позиций.
+    Это классическая перестановка: идём по цепочке «кто сидит на моём месте»,
+    рекурсивно освобождая её с хвоста. Замкнулась в кольцо — один участник
+    уходит на времянку и разрывает круг. Проводнику отдаётся уже готовая
+    последовательность ходов, каждый из которых заведомо в свободную клетку.
     """
     st = get_state(defview, lv) if defview else {"cell_w": 88, "cell_h": 116}
     cw, ch = max(8, st["cell_w"]), max(8, st["cell_h"])
-    near_x, near_y = cw * 0.6, ch * 0.6
 
-    cur = {i: (x, y) for i, _, x, y in read_icons(lv)}
-    pending = {i: (int(x), int(y)) for i, (x, y) in index_to_xy.items()}
+    icons = read_icons(lv)
+    base_x = min((x for _, _, x, _ in icons), default=0)
+    base_y = min((y for _, _, _, y in icons), default=0)
 
-    def occupied(tx, ty, ignore):
-        for j, (x, y) in cur.items():
-            if j != ignore and abs(x - tx) < near_x and abs(y - ty) < near_y:
-                return True
-        return False
+    def cell(x, y):
+        """Координаты -> клетка. Сравнивать позиции точным равенством нельзя:
+        snap-to-grid подправляет их на пару пикселей."""
+        return (round((x - base_x) / cw), round((y - base_y) / ch))
 
-    # Ячейки, куда кто-то целится. Парковать в них нельзя: временный жилец
-    # займёт чужое место, и вместо одного затора получим два.
-    targets = list(index_to_xy.values())
+    where = {i: cell(x, y) for i, _, x, y in icons}
+    occ = {c: i for i, c in where.items()}
+    goal = {i: cell(x, y) for i, (x, y) in index_to_xy.items() if i in where}
+    goal_xy = {i: (int(x), int(y)) for i, (x, y) in index_to_xy.items()}
+    wanted = set(goal.values())
 
-    def is_target(tx, ty):
-        return any(abs(x - tx) < near_x and abs(y - ty) < near_y for x, y in targets)
+    rows = st.get("area_h", 1400) // ch + 1
+    cols = st.get("area_w", 2560) // cw + 1
 
-    def free_spot():
-        """Свободная ячейка, которая при этом не является ничьей целью."""
-        x0 = st.get("area_x", 0) + 4
-        y0 = st.get("area_y", 0) + 2
-        for r in range(st.get("area_h", 1000) // ch):
-            for c in range(st.get("area_w", 1000) // cw):
-                tx, ty = x0 + c * cw, y0 + r * ch
-                if not occupied(tx, ty, None) and not is_target(tx, ty):
-                    return tx, ty
+    def spare_cell():
+        """Свободная клетка, на которую никто не целится. Ищем с конца сетки:
+        парковка в правом нижнем углу глаза не мозолит, а в левом верхнем
+        сразу бросается — там раньше и скапливались «сошедшие с ума» значки."""
+        for r in range(rows - 1, -1, -1):
+            for c in range(cols - 1, -1, -1):
+                if (c, r) not in occ and (c, r) not in wanted:
+                    return (c, r)
         return None
 
-    waves = parked = 0
-    with RemoteBuffer(lv) as rb:
-        # запаса по проходам должно хватать на длинные цепочки перестановок:
-        # при плотной раскладке каждая волна двигает лишь несколько значков
-        while pending and waves < 600:
-            moved = []
-            for idx, (tx, ty) in list(pending.items()):
-                if occupied(tx, ty, idx):
-                    continue
-                _write(rb, lv, idx, tx, ty)
-                moved.append(idx)
-            waves += 1
+    moves = []
+    parked = 0
 
-            if not moved:
-                # тупик: значки ждут друг друга по кругу — уводим одного на времянку
-                spot = free_spot()
-                if spot is None or parked > len(index_to_xy):
-                    break
-                idx = next(iter(pending))
-                _write(rb, lv, idx, *spot)
+    def shift(i, c):
+        old = where.get(i)
+        if old is not None and occ.get(old) == i:
+            del occ[old]
+        occ[c] = i
+        where[i] = c
+        xy = goal_xy[i] if goal.get(i) == c else (base_x + c[0] * cw, base_y + c[1] * ch)
+        moves.append((i, xy))
+
+    def relocate(i, chain):
+        nonlocal parked
+        t = goal.get(i)
+        if t is None or where.get(i) == t:
+            return
+        blocker = occ.get(t)
+        if blocker is not None and blocker != i:
+            if blocker in chain:
+                s = spare_cell()
+                if s is None:
+                    return
+                shift(blocker, s)
                 parked += 1
+            elif blocker in goal:
+                relocate(blocker, chain | {i})
+                if occ.get(t) not in (None, i):
+                    s = spare_cell()
+                    if s is None:
+                        return
+                    shift(occ[t], s)
+                    parked += 1
+            else:
+                s = spare_cell()
+                if s is None:
+                    return
+                shift(blocker, s)
+        if occ.get(t) in (None, i):
+            shift(i, t)
 
-            # реальное состояние спрашиваем у системы: snap мог поправить координаты
-            cur = {i: (x, y) for i, _, x, y in read_icons(lv)}
-            for idx in moved:
-                tx, ty = pending[idx]
-                if abs(cur[idx][0] - tx) < near_x and abs(cur[idx][1] - ty) < near_y:
-                    del pending[idx]
+    sys.setrecursionlimit(max(3000, len(goal) * 6))
+    for i in list(goal):
+        try:
+            relocate(i, frozenset())
+        except RecursionError:
+            break
+
+    with RemoteBuffer(lv) as rb:
+        for i, (x, y) in moves:
+            _write(rb, lv, i, x, y)
 
     user32.SendMessageW(lv, LVM_REDRAWITEMS, 0,
                         user32.SendMessageW(lv, LVM_GETITEMCOUNT, 0, 0))
     user32.InvalidateRect(lv, None, True)
+
+    left = sum(1 for i, t in goal.items() if where.get(i) != t)
     if verbose:
-        print(f"  проходов: {waves}, временных парковок: {parked}, "
-              f"не удалось поставить: {len(pending)}")
-    return len(pending)
+        print(f"  перестановок: {len(moves)}, временных парковок: {parked}, "
+              f"не удалось поставить: {left}")
+    return left
 
 
 def get_state(defview, lv):
@@ -427,6 +458,61 @@ def cmd_restore(path):
         print(f"Не нашлось на рабочем столе ({len(missed)}): {', '.join(missed[:8])}")
 
 
+def evict_squatters(plan, icons, st, layout):
+    """
+    Отодвигает значки, которых нет в раскладке, с чужих мест.
+
+    Появился на столе новый файл — Windows сажает его в первую свободную
+    ячейку, и та запросто оказывается местом значка из раскладки. Вернуть
+    раскладку становится невозможно: двигать чужака никто не пытается,
+    цель заблокирована навсегда. Ровно это и происходило — сторож раз за
+    разом сообщал «не на месте: 20» и ничего не мог поделать.
+
+    Поэтому перед раскладкой находим таких сквоттеров и переселяем их
+    в ячейки, на которые никто не претендует, начиная с конца сетки —
+    чтобы временные жильцы копились в дальнем углу, а не лезли в глаза
+    в левом верхнем.
+    """
+    cw, ch = max(8, st["cell_w"]), max(8, st["cell_h"])
+    near_x, near_y = cw * 0.6, ch * 0.6
+    targets = list(plan.values())
+
+    def hits_target(x, y):
+        return any(abs(tx - x) < near_x and abs(ty - y) < near_y for tx, ty in targets)
+
+    squatters = [(i, x, y) for i, n, x, y in icons
+                 if i not in plan and hits_target(x, y)]
+    if not squatters:
+        return plan, 0
+
+    geom = layout.get("geometry", {})
+    ox = geom.get("origin_x", st["area_x"] + 13)
+    oy = geom.get("origin_y", st["area_y"] + 2)
+    cols = max(1, (st["area_x"] + st["area_w"] - ox) // cw)
+    rows = max(1, (st["area_y"] + st["area_h"] - oy) // ch)
+
+    busy = [(x, y) for i, n, x, y in icons if i not in {s[0] for s in squatters}]
+    busy += targets
+
+    def is_free(x, y):
+        return not any(abs(bx - x) < near_x and abs(by - y) < near_y for bx, by in busy)
+
+    # с конца сетки: правый нижний угол заметно спокойнее левого верхнего
+    spare = []
+    for r in range(rows - 1, -1, -1):
+        for c in range(cols - 1, -1, -1):
+            p = (ox + c * cw, oy + r * ch)
+            if is_free(*p):
+                spare.append(p)
+        if len(spare) >= len(squatters):
+            break
+
+    for (i, _, _), p in zip(squatters, spare):
+        plan[i] = p
+        busy.append(p)
+    return plan, min(len(squatters), len(spare))
+
+
 def cmd_apply(layout_path, quiet=False):
     """
     quiet — режим для сторожа: без бекапа и без вывода.
@@ -467,6 +553,10 @@ def cmd_apply(layout_path, quiet=False):
             missed.append(name)
             continue
         plan[idx] = (rec["x"], rec["y"])
+
+    plan, evicted = evict_squatters(plan, icons, st, layout)
+    if evicted and not quiet:
+        print(f"Отодвинуто чужих значков с занятых мест: {evicted}")
 
     left = set_positions(lv, plan, defview, verbose=not quiet)
     if quiet:

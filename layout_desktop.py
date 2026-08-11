@@ -272,9 +272,12 @@ def main():
     print(f"  основной монитор: {geom['area_w']}x{geom['area_h']} "
           f"(весь стол {geom['width']}x{geom['height']})")
 
+    origin = grid_origin(geom, list(on_desktop.values()))
+    geom["origin_x"], geom["origin_y"] = origin
+
     if mode == "grid":
         placed = layout_grid(names, P, geom, reserved, fill="--fill" in sys.argv,
-                             origin=grid_origin(geom, list(on_desktop.values())))
+                             origin=origin)
     else:
         if geom["snap_to_grid"]:
             print("  !! включено «выровнять значки по сетке» — свободные координаты")
