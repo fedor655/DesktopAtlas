@@ -36,6 +36,11 @@ if (-not $isAdmin) {
 
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
+
+# Всё окно пишем в файл: если что-то пойдёт не так, будет что показать.
+New-Item -ItemType Directory -Force (Join-Path $root 'logs') | Out-Null
+try { Start-Transcript -Path (Join-Path $root 'logs\shot_ps.log') -Append | Out-Null } catch {}
+
 Write-Host "Проект: $root"
 
 # --- интерпретатор ---
@@ -93,5 +98,12 @@ finally {
 }
 
 Write-Host ""
-Write-Host "Готово. Снимок: $root\docs\desktop.png"
+$shot = Join-Path $root 'docs\desktop.png'
+if (Test-Path $shot) {
+    $kb = [math]::Round((Get-Item $shot).Length / 1KB)
+    Write-Host "Готово. Снимок: $shot ($kb КБ)"
+} else {
+    Write-Host "СНИМОК НЕ СОЗДАН. Что случилось — в logs\shot.log и logs\shot_ps.log"
+}
+try { Stop-Transcript | Out-Null } catch {}
 Read-Host "Нажми Enter, чтобы закрыть"

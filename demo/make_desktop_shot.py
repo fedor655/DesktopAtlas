@@ -42,6 +42,25 @@ sys.path.insert(0, ROOT)
 DEMO_SRC = os.path.join(HERE, "desktop")
 OUT = os.path.join(ROOT, "docs", "desktop.png")
 
+# Пишем всё в файл: скрипт запускают двойным кликом из окна, которое
+# закрывается, и разбираться потом не по чему.
+LOG = os.path.join(ROOT, "logs", "shot.log")
+os.makedirs(os.path.dirname(LOG), exist_ok=True)
+
+
+def say(*args):
+    line = " ".join(str(a) for a in args)
+    print(line)
+    try:
+        with open(LOG, "a", encoding="utf-8") as f:
+            from datetime import datetime
+            f.write(f"{datetime.now():%Y-%m-%d %H:%M:%S}  {line}\n")
+    except OSError:
+        pass
+
+
+print = say          # noqa: A001 — весь вывод скрипта заодно уходит в журнал
+
 FILE_ATTRIBUTE_HIDDEN = 0x02
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
@@ -316,4 +335,14 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    print("=" * 60)
+    print(f"запуск, python {sys.version.split()[0]}, admin="
+          f"{bool(ctypes.WinDLL('shell32').IsUserAnAdmin())}")
+    try:
+        code = main()
+    except Exception:
+        import traceback
+        print("СБОЙ:\n" + traceback.format_exc())
+        code = 1
+    print(f"выход с кодом {code}; журнал: {LOG}")
+    sys.exit(code)
