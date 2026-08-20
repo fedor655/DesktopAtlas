@@ -194,10 +194,17 @@ def main():
 
         # Сменилась конфигурация экранов — старые координаты больше не годятся,
         # раскладку надо считать заново, а не возвращать.
-        if geom and (st["area_w"], st["area_h"]) != (geom.get("area_w"),
-                                                     geom.get("area_h")):
-            log(f"область экрана была {geom.get('area_w')}x{geom.get('area_h')}, "
-                f"стала {st['area_w']}x{st['area_h']}")
+        #
+        # Сравнивать только ширину и высоту нельзя: при добавлении монитора
+        # СЛЕВА основной остаётся тем же 2560x1368, но его начало в координатах
+        # рабочего стола уезжает с 0 на 1280. Раскладка после этого указывает
+        # на соседний экран, вернуть её невозможно в принципе — а сторож этого
+        # не видел и бесконечно докладывал «не на месте: 201».
+        frame_now = (st["area_x"], st["area_y"], st["area_w"], st["area_h"])
+        frame_was = (geom.get("area_x"), geom.get("area_y"),
+                     geom.get("area_w"), geom.get("area_h"))
+        if geom and frame_now != frame_was:
+            log(f"область экрана была {frame_was}, стала {frame_now}")
             if rebuild_layout():
                 want, geom = load_layout()
                 failures = 0
@@ -262,6 +269,11 @@ if __name__ == "__main__":
         sys.exit(main())
     except KeyboardInterrupt:
         log("сторож остановлен")
+    except Exception:
+        # без этого сторож умирал беззвучно: под pythonw печатать некуда,
+        # и в журнале просто обрывались записи
+        import traceback
+        log("СТОРОЖ УПАЛ:" + chr(10) + traceback.format_exc())
     finally:
         try:
             if os.path.exists(LOCK) and \
